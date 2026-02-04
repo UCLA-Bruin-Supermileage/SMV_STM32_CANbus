@@ -8,6 +8,7 @@ static void MX_GPIO_Init(void);
 CAN_HandleTypeDef hcan1;
 CANBUS can1;
 double send_num = 0;
+volatile static double can_read [4] = {0}
 
 int main(void)
 {
@@ -19,18 +20,23 @@ int main(void)
   can1 = CAN_new(); // construct a CAN object
 
   can1.init(&can1, HS2, &hcan1); // methods require pointers to self because C has no "this" pointer
-  can1.addFilterDeviceData(&can1, UI, Horn);
+  can1.addFilterDeviceData(&can1, HS3, Pressure);
+  can1.addFilterDeviceData(&can1, HS3, Accel_x);
+  can1.addFilterDeviceData(&can1, HS3, Accel_y);
+  can1.addFilterDeviceData(&can1, HS3, Accel_z);
   can1.begin(&can1);
+
+  uint32_t timer = HAL_GetTick();
 
   while (1)
   {
 
-	  can1.send(&can1, send_num, Pressure);
-	  send_num+=0.01;
-	  /*NOTE:
-	   * LED toggle with callback is disabled to accommodate higher frequency
-	   */
-	  HAL_Delay(10);
+	   if ((HAL_GetTick() - timer)> 10){
+		  timer = HAL_GetTick();
+		  can1.send(&can1, 0, Horn);
+		  can1.send(&can1, 1, Wipers);
+	  }
+
   }
 }
 
@@ -113,8 +119,16 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
         /* Reception Error */
        Error_Handler();
     }else{
-    	//HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
     	CAN_Interrupt_Helper(&can1);
+      if (can1.getHardwareRaw(&can1) == HS3 && can1.getDataTypeRaw(&can1) == Pressure){
+			can_read [0] = can1.getData(&can1);
+      }else if (can1.getHardwareRaw(&can1) == HS3 && can1.getDataTypeRaw(&can1) == Accel_x){
+        can_read [1] = can1.getData(&can1);
+      }else if (can1.getHardwareRaw(&can1) == HS3 && can1.getDataTypeRaw(&can1) == Accel_y){
+        can_read [2] = can1.getData(&can1);
+      }else if (can1.getHardwareRaw(&can1) == HS3 && can1.getDataTypeRaw(&can1) == Accel_z){
+        can_read [3] = can1.getData(&can1);
+		}
     }
 
 }

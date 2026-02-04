@@ -18,6 +18,9 @@ struct CANBUS {
     CAN_FilterTypeDef  sFilterConfig;
     int device_id; // id of your board.
 
+    int rec_hardware;
+    int rec_dataType;
+
     // message data
     char hardware[20]; // hardware type from the incoming message
     char dataType[20]; // datatype from the incoming
@@ -29,6 +32,8 @@ struct CANBUS {
     void (*init)(CANBUS*, int, CAN_HandleTypeDef*); /* initialize the CAN bus driver @param CANBUS* pointer to your CANBUS object @param int your board's ID. reference the enums. @param CAN_HandleTypeDef* pointer to your STM32 generated CAN handler */
     void (*begin)(CANBUS*); /* CAN bus begins running in normal mode @param CANBUS* pointer to your CANBUS object */
     double (*getData)(CANBUS*); /* get incoming message from CAN bus line @param CANBUS* pointer to your CANBUS object */
+    int (*getDataTypeRaw)(CANBUS*); /*get raw integer value of data type received*/
+    int (*getHardwareRaw)(CANBUS*); /*get raw integer value of hardware received*/
     char* (*getDataType)(CANBUS*); /* get data type of incoming message from CAN bus line @param CANBUS* pointer to your CANBUS object */
     char* (*getHardware)(CANBUS*); /* get data type of incoming message from CAN bus line @param CANBUS* pointer to your CANBUS object */
     void (*addFilterDevice)(CANBUS*, int); /* receive data only from the device specified, filters everything else @param CANBUS* pointer to your CANBUS object @param int the board ID to listen to. reference the enums. */
