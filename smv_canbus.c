@@ -260,7 +260,7 @@ static int CAN_GetDataTypeRaw(CANBUS *can){
 Purpose: return the dataType string assigned in the CAN interrupt
 */
 static char* CAN_GetDataType(CANBUS *can){
-	const char* dataType_string = readDataType(hardware_id, dataType_id);
+	const char* dataType_string = readDataType(can->rec_hardware, can->rec_dataType);
 	memcpy(can->dataType, dataType_string, strlen(dataType_string)+1);
 	return can->dataType;
 }
@@ -269,7 +269,7 @@ static char* CAN_GetDataType(CANBUS *can){
 Purpose: return the hardware string assigned in the CAN interrupt
 */
 static char* CAN_GetHardware(CANBUS *can){
-	const char* hardware_string = devices[hardware_id];
+	const char* hardware_string = devices[can->rec_hardware];
 	memcpy(can->hardware, hardware_string , strlen(hardware_string)+1);
 	return can->hardware;
 }
