@@ -8,7 +8,9 @@ static void MX_GPIO_Init(void);
 CAN_HandleTypeDef hcan1;
 CANBUS can1;
 double send_num = 0;
-volatile static double can_read [4] = {0}
+volatile static double can_read [4] = {0};
+volatile static char hardware [20] = {0};
+volatile static char data_type [20] = {0};
 
 int main(void)
 {
@@ -19,11 +21,8 @@ int main(void)
 
   can1 = CAN_new(); // construct a CAN object
 
-  can1.init(&can1, HS2, &hcan1); // methods require pointers to self because C has no "this" pointer
-  can1.addFilterDeviceData(&can1, HS3, Pressure);
-  can1.addFilterDeviceData(&can1, HS3, Accel_x);
-  can1.addFilterDeviceData(&can1, HS3, Accel_y);
-  can1.addFilterDeviceData(&can1, HS3, Accel_z);
+  can1.init(&can1, UI, &hcan1); // methods require pointers to self because C has no "this" pointer
+  can1.addFilterDevice(&can1, FC);
   can1.begin(&can1);
 
   uint32_t timer = HAL_GetTick();
@@ -31,7 +30,7 @@ int main(void)
   while (1)
   {
 
-	   if ((HAL_GetTick() - timer)> 10){
+	   if ((HAL_GetTick() - timer)> 1000){
 		  timer = HAL_GetTick();
 		  can1.send(&can1, 0, Horn);
 		  can1.send(&can1, 1, Wipers);
@@ -120,15 +119,13 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
        Error_Handler();
     }else{
     	CAN_Interrupt_Helper(&can1);
-      if (can1.getHardwareRaw(&can1) == HS3 && can1.getDataTypeRaw(&can1) == Pressure){
+      if (can1.getHardwareRaw(&can1) == FC && can1.getDataTypeRaw(&can1) == FC_Pressure){
 			can_read [0] = can1.getData(&can1);
-      }else if (can1.getHardwareRaw(&can1) == HS3 && can1.getDataTypeRaw(&can1) == Accel_x){
+      }else if (can1.getHardwareRaw(&can1) == FC && can1.getDataTypeRaw(&can1) == Gas){
         can_read [1] = can1.getData(&can1);
-      }else if (can1.getHardwareRaw(&can1) == HS3 && can1.getDataTypeRaw(&can1) == Accel_y){
+      }else if (can1.getHardwareRaw(&can1) == FC && can1.getDataTypeRaw(&can1) == Brake){
         can_read [2] = can1.getData(&can1);
-      }else if (can1.getHardwareRaw(&can1) == HS3 && can1.getDataTypeRaw(&can1) == Accel_z){
-        can_read [3] = can1.getData(&can1);
-		}
+      }
     }
 
 }
