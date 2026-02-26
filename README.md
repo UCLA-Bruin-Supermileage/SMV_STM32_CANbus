@@ -1,7 +1,7 @@
 # SMV_STM32_CANbus
 Bruin Racing Supermileage CANbus Library
 
-This library was written for the STM32F446RE. Readaptation is likely required for other boards if you choose to use them in the future. Arduino libraries for the RP2040 Adafruit CAN Feather, Teensy4, and ESP32 are available [here](https://github.com/UCLA-Bruin-Supermileage/UCLA-SMV-CAN/tree/main). The assumption is no boards will continue to use these libraries (except the DAQ board), and thus these libraries are no longer maintained (but are backwards compatible with this one).
+This library is compatible with any CAN-enabled STM32F4XX device, but has only been validated for the STM32F446RE. The library expects that the target device has an built-in CAN controller. Arduino libraries for the RP2040 Adafruit CAN Feather, Teensy4, and ESP32 are available [here](https://github.com/UCLA-Bruin-Supermileage/UCLA-SMV-CAN/tree/main). The assumption is that no boards will continue to use these libraries (except the DAQ board), and thus these libraries are no longer maintained (but are backwards compatible with this one). Note that both libraries are fixed at 500 kbps and will not function together if the bit rates are manually changed to differing values.
 
 ## Installation
 
