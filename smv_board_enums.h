@@ -5,6 +5,11 @@
 // pick the appropriate one for your board
 // every time you send a message, pick the appropriate data type for that message.
 
+enum CAN_controllers{
+	CAN_1,
+	CAN_2
+};
+
 enum devices {
     Safety,
     UI,

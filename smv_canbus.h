@@ -4,11 +4,13 @@
 #include "stm32f4xx_hal.h"
 #include "smv_board_enums.h"
 
+#define CAN_2_FILTER_BANK_INDEX 14
+#define CAN_1_MAX_FILTER_BANK_INDEX 13
+#define CAN_2_MAX_FILTER_BANK_INDEX 27
+
 typedef struct CANBUS CANBUS;
 struct CANBUS {
-    /* MEMBERS */
-    /* DO NOT USE DIRECTLY UNLESS YOU KNOW WHAT YOU'RE DOING */
-    // stm32 stuff.
+
     uint32_t              TxMailbox;       /* The number of the mail box that transmitted the Tx message */
     CAN_TxHeaderTypeDef   TxHeader;        /* Header containing the information of the transmitted frame */
     uint8_t               TxData[8]; /* Buffer of the data to send */
@@ -16,19 +18,19 @@ struct CANBUS {
     uint8_t               RxDataFIFO0[8];  /* Buffer of the received data */
     CAN_HandleTypeDef *hcan;
     CAN_FilterTypeDef  sFilterConfig;
-    int device_id; // id of your board.
 
+    int device_id;
     int rec_hardware;
     int rec_dataType;
 
-    // message data
+    /* MESSAGE DATA */
     char hardware[20]; // hardware type from the incoming message
     char dataType[20]; // datatype from the incoming
     double data; // data from incoming message
     uint8_t filter_bank; //keep track of which filter bank to fill next; we want to keep it between 0 and 14
+    uint8_t max_filter_bank;
 
     /* METHODS */
-    // use only these to interact with your CANBUS object.
     void (*init)(CANBUS*, int, CAN_HandleTypeDef*); /* initialize the CAN bus driver @param CANBUS* pointer to your CANBUS object @param int your board's ID. reference the enums. @param CAN_HandleTypeDef* pointer to your STM32 generated CAN handler */
     void (*begin)(CANBUS*); /* CAN bus begins running in normal mode @param CANBUS* pointer to your CANBUS object */
     double (*getData)(CANBUS*); /* get incoming message from CAN bus line @param CANBUS* pointer to your CANBUS object */
@@ -45,7 +47,7 @@ struct CANBUS {
 /*
 Constructor workaround in C. Call this when creating your CAN object, and then proceed with the rest of the example.
 */
-CANBUS CAN_new(void);
+CANBUS CAN_new(int can_index);
 
 /*
 - CubeMX defines a CAN interrupt handler when the programmer enables the interrupt in NVIC settings in ioc

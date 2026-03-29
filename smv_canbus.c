@@ -134,7 +134,6 @@ static void CAN_QuickSetup(CANBUS *can, int hardware, CAN_HandleTypeDef *can_obj
 
 
 	can->device_id = hardware;
-	can->filter_bank = 0;
 
 	can->hcan->Instance = CAN1;
 	can->hcan->Init.Prescaler = 6;
@@ -156,7 +155,7 @@ static void CAN_QuickSetup(CANBUS *can, int hardware, CAN_HandleTypeDef *can_obj
 		Error_Handler();
 	}
 
-	can->sFilterConfig.SlaveStartFilterBank = 14;           /* Slave start bank Set only once. */
+	can->sFilterConfig.SlaveStartFilterBank = CAN_2_FILTER_BANK_INDEX;           /* Slave start bank Set only once. */
 
 	can->sFilterConfig.FilterBank = 0;                      /* Select the filter number 0 */
 	can->sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;  /* Using ID mask mode .. */
@@ -297,23 +296,26 @@ Method:
 
 */
 static void CAN_AddFilterDevice(CANBUS *can, int device_id){
-    can->sFilterConfig.FilterBank = can->filter_bank;
-	can->sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
-	can->sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
-	can->sFilterConfig.FilterIdHigh = ((device_id & 0x0F) << 7)<<5;
-	can->sFilterConfig.FilterIdLow = 0x0000;
-	can->sFilterConfig.FilterMaskIdHigh = 0xF000;
-	can->sFilterConfig.FilterMaskIdLow = 0x0000;
-	can->sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
-	can->sFilterConfig.FilterActivation = ENABLE;
+	if (can->filter_bank > can->max_filter_bank){return;}
+	else{
+		can->sFilterConfig.FilterBank = can->filter_bank;
+		can->sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+		can->sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+		can->sFilterConfig.FilterIdHigh = ((device_id & 0x0F) << 7)<<5;
+		can->sFilterConfig.FilterIdLow = 0x0000;
+		can->sFilterConfig.FilterMaskIdHigh = 0xF000;
+		can->sFilterConfig.FilterMaskIdLow = 0x0000;
+		can->sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
+		can->sFilterConfig.FilterActivation = ENABLE;
 
-	if (HAL_CAN_ConfigFilter(can->hcan, &(can->sFilterConfig)) != HAL_OK)
-	{
-	   /* Filter configuration Error */
-	   Error_Handler();
+		if (HAL_CAN_ConfigFilter(can->hcan, &(can->sFilterConfig)) != HAL_OK)
+		{
+		   /* Filter configuration Error */
+		   Error_Handler();
+		}
+
+		can->filter_bank++;
 	}
-
-	can->filter_bank++;
 }
 
 /*
@@ -327,27 +329,30 @@ Method:
 
 */
 static void CAN_AddFilterDeviceData(CANBUS *can, int device_id, int data_type){
-    can->sFilterConfig.FilterBank = can->filter_bank;
-	can->sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
-	can->sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
-	can->sFilterConfig.FilterIdHigh = (((device_id & 0x0F) << 7) + data_type)<<5;
-	can->sFilterConfig.FilterIdLow = 0x0000;
-	can->sFilterConfig.FilterMaskIdHigh = 0b1111000111100000;
-	can->sFilterConfig.FilterMaskIdLow = 0x0000;
-	can->sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
-	can->sFilterConfig.FilterActivation = ENABLE;
+	if (can->filter_bank > can->max_filter_bank){return;}
+	else{
+		can->sFilterConfig.FilterBank = can->filter_bank;
+		can->sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+		can->sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+		can->sFilterConfig.FilterIdHigh = (((device_id & 0x0F) << 7) + data_type)<<5;
+		can->sFilterConfig.FilterIdLow = 0x0000;
+		can->sFilterConfig.FilterMaskIdHigh = 0b1111000111100000;
+		can->sFilterConfig.FilterMaskIdLow = 0x0000;
+		can->sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
+		can->sFilterConfig.FilterActivation = ENABLE;
 
-	if (HAL_CAN_ConfigFilter(can->hcan, &(can->sFilterConfig)) != HAL_OK)
-	{
-	   /* Filter configuration Error */
-	   Error_Handler();
+		if (HAL_CAN_ConfigFilter(can->hcan, &(can->sFilterConfig)) != HAL_OK)
+		{
+		   /* Filter configuration Error */
+		   Error_Handler();
+		}
+
+		can->filter_bank++;
 	}
-
-	can->filter_bank++;
 }
 
 //Pseudo-constructor to mimic C++ convention with C limitations
-CANBUS CAN_new(void) {
+CANBUS CAN_new(int can_index) {
 	CANBUS can;
 	can.init = CAN_QuickSetup;
 	can.begin = CAN_Run;
@@ -359,6 +364,10 @@ CANBUS CAN_new(void) {
 	can.addFilterDevice = CAN_AddFilterDevice;
 	can.addFilterDeviceData = CAN_AddFilterDeviceData;
 	can.send = CAN_Send;
+
+	can.filter_bank = CAN_2_FILTER_BANK_INDEX*can_index;
+	can.max_filter_bank = (can_index == CAN_2)? CAN_2_MAX_FILTER_BANK_INDEX : CAN_1_MAX_FILTER_BANK_INDEX;
+
 	return can;
 }
 
