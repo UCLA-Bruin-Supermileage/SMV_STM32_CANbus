@@ -1,5 +1,6 @@
 #include "smv_canbus.h"
 #include <string.h>
+#include <assert.h>
 
 void Error_Handler(void); // must be provided by user
 
@@ -108,6 +109,9 @@ const char* readDataType(int first, int last)
     return "";
 }
 
+
+static CAN_HandleTypeDef *master_can = NULL;
+
 /*
 Purpose:
 - Initialize can object with our tested can settings
@@ -135,7 +139,7 @@ static void CAN_QuickSetup(CANBUS *can, int hardware, CAN_HandleTypeDef *can_obj
 
 	can->device_id = hardware;
 
-	can->hcan->Instance = CAN1;
+	can->hcan->Instance = (can->instance == CAN_1)? CAN1 : CAN2;
 	can->hcan->Init.Prescaler = 6;
 	can->hcan->Init.Mode = CAN_MODE_NORMAL;
 	can->hcan->Init.SyncJumpWidth = CAN_SJW_1TQ;
@@ -148,16 +152,20 @@ static void CAN_QuickSetup(CANBUS *can, int hardware, CAN_HandleTypeDef *can_obj
 	can->hcan->Init.ReceiveFifoLocked = DISABLE;
 	can->hcan->Init.TransmitFifoPriority = DISABLE;
 
-	__HAL_RCC_CAN1_CLK_ENABLE();
+	if (can->instance == CAN_1){
+		__HAL_RCC_CAN1_CLK_ENABLE();
+		master_can = can->hcan;
+	}else{
+		assert(master_can != NULL);  // CAN1 must be init'd first
+		__HAL_RCC_CAN2_CLK_ENABLE();
+	}
 
-	if (HAL_CAN_Init(can_obj) != HAL_OK)
+	if (HAL_CAN_Init(can->hcan) != HAL_OK)
 	{
 		Error_Handler();
 	}
 
-	can->sFilterConfig.SlaveStartFilterBank = CAN_2_FILTER_BANK_INDEX;           /* Slave start bank Set only once. */
-
-	can->sFilterConfig.FilterBank = 0;                      /* Select the filter number 0 */
+	can->sFilterConfig.FilterBank = can->filter_bank;
 	can->sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;  /* Using ID mask mode .. */
 	can->sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT; /* .. in 32-bit scale */
 	can->sFilterConfig.FilterIdHigh = 0x0000;
@@ -168,7 +176,7 @@ static void CAN_QuickSetup(CANBUS *can, int hardware, CAN_HandleTypeDef *can_obj
 	can->sFilterConfig.FilterActivation = ENABLE;           /* Enable the filter number 0 */
 
 
-	if (HAL_CAN_ConfigFilter(can_obj, &(can->sFilterConfig)) != HAL_OK)
+	if (HAL_CAN_ConfigFilter(can->hcan, &(can->sFilterConfig)) != HAL_OK)
 	{
 	   /* Filter configuration Error */
 	   Error_Handler();
@@ -222,7 +230,7 @@ static void CAN_Send(CANBUS *can, double message, uint8_t data_type){
 	}
 
 	/* It's mandatory to look for a free Tx mail box */
-	while(HAL_CAN_GetTxMailboxesFreeLevel(can->hcan) == 0) {} /* Wait till a Tx mailbox is free. Using while loop instead of HAL_Delay() */
+	while(HAL_CAN_GetTxMailboxesFreeLevel(can->hcan) == 0) {}
 
 	if (HAL_CAN_AddTxMessage(can->hcan, &(can->TxHeader), can->TxData, &(can->TxMailbox)) != HAL_OK) /* Send the CAN frame */
 	{
@@ -308,7 +316,7 @@ static void CAN_AddFilterDevice(CANBUS *can, int device_id){
 		can->sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
 		can->sFilterConfig.FilterActivation = ENABLE;
 
-		if (HAL_CAN_ConfigFilter(can->hcan, &(can->sFilterConfig)) != HAL_OK)
+		if (HAL_CAN_ConfigFilter(master_can, &(can->sFilterConfig)) != HAL_OK)
 		{
 		   /* Filter configuration Error */
 		   Error_Handler();
@@ -341,7 +349,7 @@ static void CAN_AddFilterDeviceData(CANBUS *can, int device_id, int data_type){
 		can->sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
 		can->sFilterConfig.FilterActivation = ENABLE;
 
-		if (HAL_CAN_ConfigFilter(can->hcan, &(can->sFilterConfig)) != HAL_OK)
+		if (HAL_CAN_ConfigFilter(master_can, &(can->sFilterConfig)) != HAL_OK)
 		{
 		   /* Filter configuration Error */
 		   Error_Handler();
@@ -352,7 +360,7 @@ static void CAN_AddFilterDeviceData(CANBUS *can, int device_id, int data_type){
 }
 
 //Pseudo-constructor to mimic C++ convention with C limitations
-CANBUS CAN_new(int can_index) {
+CANBUS CAN_new() {
 	CANBUS can;
 	can.init = CAN_QuickSetup;
 	can.begin = CAN_Run;
@@ -365,8 +373,31 @@ CANBUS CAN_new(int can_index) {
 	can.addFilterDeviceData = CAN_AddFilterDeviceData;
 	can.send = CAN_Send;
 
+	can.instance = CAN_1;
+	can.filter_bank = 0;
+	can.max_filter_bank = CAN_MAX_FILTER_BANK_INDEX;
+	can.sFilterConfig.SlaveStartFilterBank = can.max_filter_bank;           /* Slave start bank Set only once. */
+
+	return can;
+}
+
+CANBUS CAN_new_dual (int can_index)	{
+	CANBUS can;
+	can.init = CAN_QuickSetup;
+	can.begin = CAN_Run;
+	can.getData = CAN_GetData;
+	can.getDataType = CAN_GetDataType;
+	can.getHardware = CAN_GetHardware;
+	can.getDataTypeRaw = CAN_GetDataTypeRaw;
+	can.getHardwareRaw = CAN_GetHardwareRaw;
+	can.addFilterDevice = CAN_AddFilterDevice;
+	can.addFilterDeviceData = CAN_AddFilterDeviceData;
+	can.send = CAN_Send;
+
+	can.instance = can_index;
 	can.filter_bank = CAN_2_FILTER_BANK_INDEX*can_index;
 	can.max_filter_bank = (can_index == CAN_2)? CAN_2_MAX_FILTER_BANK_INDEX : CAN_1_MAX_FILTER_BANK_INDEX;
+	can.sFilterConfig.SlaveStartFilterBank = CAN_2_FILTER_BANK_INDEX;           /* Slave start bank Set only once. */
 
 	return can;
 }

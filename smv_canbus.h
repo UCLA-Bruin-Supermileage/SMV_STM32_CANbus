@@ -6,7 +6,9 @@
 
 #define CAN_2_FILTER_BANK_INDEX 14
 #define CAN_1_MAX_FILTER_BANK_INDEX 13
-#define CAN_2_MAX_FILTER_BANK_INDEX 27
+#define CAN_MAX_FILTER_BANK_INDEX 27
+#define CAN_2_MAX_FILTER_BANK_INDEX (CAN_MAX_FILTER_BANK_INDEX)
+
 
 typedef struct CANBUS CANBUS;
 struct CANBUS {
@@ -18,6 +20,8 @@ struct CANBUS {
     uint8_t               RxDataFIFO0[8];  /* Buffer of the received data */
     CAN_HandleTypeDef *hcan;
     CAN_FilterTypeDef  sFilterConfig;
+    uint8_t instance;
+
 
     int device_id;
     int rec_hardware;
@@ -47,7 +51,8 @@ struct CANBUS {
 /*
 Constructor workaround in C. Call this when creating your CAN object, and then proceed with the rest of the example.
 */
-CANBUS CAN_new(int can_index);
+CANBUS CAN_new();
+CANBUS CAN_new_dual (int can_index);
 
 /*
 - CubeMX defines a CAN interrupt handler when the programmer enables the interrupt in NVIC settings in ioc
