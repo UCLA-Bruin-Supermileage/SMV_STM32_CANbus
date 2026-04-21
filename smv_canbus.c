@@ -135,8 +135,6 @@ static void CAN_QuickSetup(CANBUS *can, int hardware, CAN_HandleTypeDef *can_obj
 	}
 
 	can->data = 0;
-
-
 	can->device_id = hardware;
 
 	can->hcan->Instance = (can->instance == CAN_1)? CAN1 : CAN2;
@@ -303,7 +301,7 @@ Method:
 - Increment filter_bank every call (must be between 0 and 13 to operate)
 
 */
-static void CAN_AddFilterDevice(CANBUS *can, int device_id){
+static void CAN_AddFilterDevice(CANBUS *can, int device_id, uint32_t FIFO_index){
 	if (can->filter_bank > can->max_filter_bank){return;}
 	else{
 		can->sFilterConfig.FilterBank = can->filter_bank;
@@ -313,7 +311,7 @@ static void CAN_AddFilterDevice(CANBUS *can, int device_id){
 		can->sFilterConfig.FilterIdLow = 0x0000;
 		can->sFilterConfig.FilterMaskIdHigh = 0xF000;
 		can->sFilterConfig.FilterMaskIdLow = 0x0000;
-		can->sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
+		can->sFilterConfig.FilterFIFOAssignment = FIFO_index;
 		can->sFilterConfig.FilterActivation = ENABLE;
 
 		if (HAL_CAN_ConfigFilter(master_can, &(can->sFilterConfig)) != HAL_OK)
@@ -336,7 +334,7 @@ Method:
 - Increment filter_bank every call (must be between 0 and 13 to operate)
 
 */
-static void CAN_AddFilterDeviceData(CANBUS *can, int device_id, int data_type){
+static void CAN_AddFilterDeviceData(CANBUS *can, int device_id, int data_type, uint32_t FIFO_index){
 	if (can->filter_bank > can->max_filter_bank){return;}
 	else{
 		can->sFilterConfig.FilterBank = can->filter_bank;
@@ -346,7 +344,7 @@ static void CAN_AddFilterDeviceData(CANBUS *can, int device_id, int data_type){
 		can->sFilterConfig.FilterIdLow = 0x0000;
 		can->sFilterConfig.FilterMaskIdHigh = 0b1111000111100000;
 		can->sFilterConfig.FilterMaskIdLow = 0x0000;
-		can->sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
+		can->sFilterConfig.FilterFIFOAssignment = FIFO_index;
 		can->sFilterConfig.FilterActivation = ENABLE;
 
 		if (HAL_CAN_ConfigFilter(master_can, &(can->sFilterConfig)) != HAL_OK)

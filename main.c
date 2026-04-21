@@ -96,6 +96,32 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
     }
 
 }
+
+void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
+
+{
+    /* Get RX message from FIFO0 and fill the data on the related FIFO0 user declared header
+       (RxHeaderFIFO0) and table (RxDataFIFO0) */
+	CANBUS *can = (CanHandle->Instance == CAN1)? &can1:&can2;
+    if (HAL_CAN_GetRxMessage(CanHandle, CAN_RX_FIFO1, &(can->RxHeaderFIFO1), can->RxDataFIFO1) != HAL_OK)
+    {
+        /* Reception Error */
+       Error_Handler();
+    }else{
+		CAN_Interrupt_Helper(can);
+		if (can->instance == CAN_1){
+			CAN1_data = can->getData(can);
+			strcpy(CAN1_sender, (can->getHardware(can)));
+			strcpy(CAN1_type, can->getDataType(can));
+		}else{
+			CAN2_data = can->getData(can);
+			strcpy(CAN2_sender, (can->getHardware(can)));
+			strcpy(CAN2_type, can->getDataType(can));
+		}
+
+    }
+
+}
 /* USER CODE END 0 */
 
 /**
@@ -140,6 +166,9 @@ int main(void)
 
   can1.begin(&can1);
   can2.begin(&can2);
+
+  can1.addFilterDevice(&can1, UI, CAN_RX_FIFO0);
+  can1.addFilterDeviceData(&can1, FC, FC_Pressure, CAN_RX_FIFO1);
 
   /* USER CODE END 2 */
 
@@ -216,6 +245,7 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 }
+
 
 
 /**

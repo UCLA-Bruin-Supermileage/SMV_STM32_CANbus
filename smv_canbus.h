@@ -18,6 +18,8 @@ struct CANBUS {
     uint8_t               TxData[8]; /* Buffer of the data to send */
     CAN_RxHeaderTypeDef   RxHeaderFIFO0;   /* Header containing the information of the received frame */
     uint8_t               RxDataFIFO0[8];  /* Buffer of the received data */
+    CAN_RxHeaderTypeDef   RxHeaderFIFO1;   /* Header containing the information of the received frame */
+    uint8_t               RxDataFIFO1[8];  /* Buffer of the received data */
     CAN_HandleTypeDef *hcan;
     CAN_FilterTypeDef  sFilterConfig;
     uint8_t instance;
@@ -42,8 +44,8 @@ struct CANBUS {
     int (*getHardwareRaw)(CANBUS*); /*get raw integer value of hardware received*/
     char* (*getDataType)(CANBUS*); /* get data type of incoming message from CAN bus line @param CANBUS* pointer to your CANBUS object */
     char* (*getHardware)(CANBUS*); /* get data type of incoming message from CAN bus line @param CANBUS* pointer to your CANBUS object */
-    void (*addFilterDevice)(CANBUS*, int); /* receive data only from the device specified, filters everything else @param CANBUS* pointer to your CANBUS object @param int the board ID to listen to. reference the enums. */
-    void (*addFilterDeviceData)(CANBUS*, int, int); /* receive only the specified type data only from the device specified, filters everything else @param CANBUS* pointer to your CANBUS object @param int the board ID to listen to. reference the enums. @param int the datatype ID to listen to. reference the enums. */
+    void (*addFilterDevice)(CANBUS*, int, uint32_t); /* receive data only from the device specified, filters everything else @param CANBUS* pointer to your CANBUS object @param int the board ID to listen to. reference the enums. */
+    void (*addFilterDeviceData)(CANBUS*, int, int, uint32_t); /* receive only the specified type data only from the device specified, filters everything else @param CANBUS* pointer to your CANBUS object @param int the board ID to listen to. reference the enums. @param int the datatype ID to listen to. reference the enums. */
     void (*send)(CANBUS*, double, uint8_t); /* send data to the CAN bus @param CANBUS* pointer to your CANBUS object @param double the data you want to send @param uint8_t the type of data you are sending. reference the enums. */
 
 };
