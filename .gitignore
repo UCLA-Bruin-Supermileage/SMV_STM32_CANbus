@@ -1,0 +1,5 @@
+build/
+.vscode/
+.settings/
+.DS_Store%
+.clang-format
