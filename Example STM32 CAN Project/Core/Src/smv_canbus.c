@@ -1,0 +1,537 @@
+#include "smv_canbus.h"
+#include "smv_can_error.h"
+#include <string.h>
+
+// error handling instance; only one CAN_Error struct is needed for the whole
+// library since it just records the most recent error, so we can just have a
+// global instance that all CANBUS objects point to
+
+#define CAN_TX_MAILBOX_TIMEOUT_MS 5u /* max wait for a free TX mailbox      */
+#define CAN_TX_MAX_RETRIES 3u        /* consecutive failures before Bus-Off */
+#define CAN_BUSOFF_RECOVERY_MS 100u  /* cooldown before recovery attempt    */
+
+// DoubleCaster union allow us to cast double to char [8] and vice versa
+// Our data is all in double format, but HAL CAN library uses char[8], so we
+// directly copy the double into the 64-bit spaced of the char array
+typedef union {
+    double num;
+    uint8_t arr[8];
+} DoubleCaster;
+
+// char strings are included in this file because STM32 library files must be
+// individually placed, so we limited the number of files
+const char *devices[] = {"Safety",           "UI",      "FC",      "RC",
+                         "Motor_Controller", "Joule_H", "Joule_L", "DAQ_Board"};
+
+const char *motorMessage[] = {
+    "Hall_Velocity", "Motor_Torque", "Motor_Current",
+    "Board_Temp",    "Motor_Temp",
+};
+
+const char *UIMessage[] = {
+    "Emergency_Stop", "Supercap_Discharge", "Blink_Left",   "Blink_Right",
+    "Reverse",        "Headlights",         "Wipers",       "Horn",
+    "Hazard",         "Spare_Button",       "Spare_Switch", "Regen",
+    "DAQ_Button"};
+
+const char *FCMessage[] = {"Gas", "Brake", "FC_Pressure"};
+
+const char *RCMessage[] = {"RC_Pressure", "RC_Torque"};
+
+const char *JouleMessage[] = {
+    "Power",
+};
+
+const char *DAQMessage[] = {"Longitude", "Latitude", "Altitude"};
+
+const char *readHardware(int first) { return devices[first]; }
+
+// Copied over from old SMV CAN library
+// Finds which data type list to look through based on board name, then finds
+// data type
+const char *readDataType(int first, int last) {
+    switch (first) {
+    case 0:
+        break;
+    case 1:
+        return UIMessage[last];
+        break;
+    case 2:
+        return FCMessage[last];
+        break;
+    case 3:
+        return RCMessage[last];
+        break;
+    case 4:
+        return motorMessage[last];
+        break;
+    case 5:
+        return JouleMessage[last];
+        break;
+    case 6:
+        return JouleMessage[last];
+        break;
+    case 7:
+        return DAQMessage[last];
+        break;
+    default:
+        break;
+    }
+    return "";
+}
+
+/*
+ * Master CAN handle. On STM32F4 bxCAN, CAN1 is the master peripheral and CAN2
+ * is the slave. All filter bank configuration -- for both instances -- must be
+ * done through the master handle. We capture it the first time CAN1 is
+ * initialized so that CAN2's filter functions can find it.
+ */
+static CAN_HandleTypeDef *master_can = NULL;
+
+/*
+CAN error handler
+*/
+
+void CAN_Error_Record(CAN_Error *err, CAN_ErrorCode code) {
+    err->code = code;
+    err->last_error_tick = HAL_GetTick();
+
+    if (err->error_count < UINT32_MAX) {
+        err->error_count++;
+    }
+
+    /* Promote to last_fatal for init-time codes */
+    if (code == CAN_ERR_INIT_FAILED || code == CAN_ERR_FILTER_FAILED ||
+        code == CAN_ERR_START_FAILED || code == CAN_ERR_NOTIFY_FAILED) {
+        err->last_fatal = code;
+    }
+
+    /* Track bus-off state explicitly */
+    if (code == CAN_ERR_TX_BUS_OFF) {
+        err->is_bus_off = 1;
+    }
+}
+
+void CAN_Error_Clear(CAN_Error *err) {
+    err->code = CAN_ERR_NONE;
+    err->is_bus_off = 0;
+    err->tx_retries = 0;
+}
+
+const char *CAN_Error_GetString(CAN_ErrorCode code) {
+    switch (code) {
+    case CAN_ERR_NONE:
+        return "NONE";
+    case CAN_ERR_INIT_FAILED:
+        return "INIT_FAILED";
+    case CAN_ERR_FILTER_FAILED:
+        return "FILTER_FAILED";
+    case CAN_ERR_START_FAILED:
+        return "START_FAILED";
+    case CAN_ERR_NOTIFY_FAILED:
+        return "NOTIFY_FAILED";
+    case CAN_ERR_TX_MAILBOX_TIMEOUT:
+        return "TX_MAILBOX_TIMEOUT";
+    case CAN_ERR_TX_ADD_FAILED:
+        return "TX_ADD_FAILED";
+    case CAN_ERR_TX_BUS_OFF:
+        return "TX_BUS_OFF";
+    case CAN_ERR_TX_MAX_RETRIES:
+        return "TX_MAX_RETRIES";
+    case CAN_ERR_RX_FAILED:
+        return "RX_FAILED";
+    case CAN_ERR_FILTER_BANK_FULL:
+        return "FILTER_BANK_FULL";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+/*
+Purpose:
+- Initialize can object with our tested can settings
+- Set initial open filter (0x0000) --> gets overwritten if programmer uses
+AddFilter function
+- Filter bank index and bounds are pre-seeded by the constructor (CAN_new or
+  CAN_new_dual) -- we do NOT reset filter_bank here, because CAN_2 starts at
+  bank 14, not 0.
+
+Programmer's POV:
+- Enable CAN1 (and CAN2 if dual), initialize CAN pins, enable interrupts, and
+  set clock
+
+Reasons for limiting abstraction (programmer will have to set up ioc in the
+beginning):
+- stm32f4xx_hal_conf has a vital line: #define HAL_CAN_MODULE_ENABLED
+    - this file is generated by CubeMX and gets called before the library does;
+the programmer will be expected to define this macro, which is not that
+intuitive
+- stm32f4xx_hal_msp sets up the pins
+    - if the library does this without the programmer interacting with the ioc,
+the ioc UI will never show the CAN pins, which could be awkward
+*/
+static void CAN_QuickSetup(CANBUS *can, int hardware,
+                           CAN_HandleTypeDef *can_obj) {
+    can->hcan = can_obj;
+    CAN_Error error_instance;
+    can->err = &error_instance;
+
+    for (int i = 0; i < 8; i++) {
+        can->RxDataFIFO0[i] = 0;
+        can->RxDataFIFO1[i] = 0;
+    }
+
+    can->data = 0;
+
+    can->device_id = hardware;
+
+    can->hcan->Instance = (can->instance == CAN_2) ? CAN2 : CAN1;
+    can->hcan->Init.Prescaler = 6;
+    can->hcan->Init.Mode = CAN_MODE_NORMAL;
+    can->hcan->Init.SyncJumpWidth = CAN_SJW_1TQ;
+    can->hcan->Init.TimeSeg1 = CAN_BS1_9TQ;
+    can->hcan->Init.TimeSeg2 = CAN_BS2_2TQ;
+    can->hcan->Init.TimeTriggeredMode = DISABLE;
+    can->hcan->Init.AutoBusOff = ENABLE;
+    can->hcan->Init.AutoWakeUp = DISABLE;
+    can->hcan->Init.AutoRetransmission = ENABLE;
+    can->hcan->Init.ReceiveFifoLocked = DISABLE;
+    can->hcan->Init.TransmitFifoPriority = DISABLE;
+
+    if (can->instance == CAN_2) {
+        /* CAN1 must be init'd first; its handle is required to configure CAN2
+         * filter banks. If a user calls init() on CAN_2 before CAN_1, record
+         * an init failure and bail out instead of asserting. */
+        if (master_can == NULL) {
+            CAN_Error_Record(can->err, CAN_ERR_INIT_FAILED);
+            return;
+        }
+        __HAL_RCC_CAN2_CLK_ENABLE();
+    } else {
+        __HAL_RCC_CAN1_CLK_ENABLE();
+        master_can = can->hcan;
+    }
+
+    if (HAL_CAN_Init(can_obj) != HAL_OK) {
+        /* Initialization Error */
+        CAN_Error_Record(can->err, CAN_ERR_INIT_FAILED);
+        return;
+    }
+
+    can->sFilterConfig.SlaveStartFilterBank =
+        CAN_2_FILTER_BANK_INDEX; /* Slave start bank Set only once. */
+
+    can->sFilterConfig.FilterBank =
+        can->filter_bank; /* CAN_1 starts at 0, CAN_2 starts at 14 */
+    can->sFilterConfig.FilterMode =
+        CAN_FILTERMODE_IDMASK; /* Using ID mask mode .. */
+    can->sFilterConfig.FilterScale =
+        CAN_FILTERSCALE_32BIT; /* .. in 32-bit scale */
+    can->sFilterConfig.FilterIdHigh = 0x0000;
+    can->sFilterConfig.FilterIdLow =
+        0x0000; /* The filter is set to receive only the Standard ID frames */
+    can->sFilterConfig.FilterMaskIdHigh =
+        0x0000; /* Accept all the IDs .. except the Extended frames */
+    can->sFilterConfig.FilterMaskIdLow =
+        0x0000; /* The filter is set to check only on the ID format */
+    can->sFilterConfig.FilterFIFOAssignment =
+        CAN_RX_FIFO0; /* All the messages accepted by this filter will be
+                         received on FIFO0 */
+    can->sFilterConfig.FilterActivation =
+        ENABLE; /* Enable the filter number 0 */
+
+    /* Filter configuration must always go through the master (CAN1) handle,
+     * even for CAN2 banks. master_can was set above when CAN1 was init'd. */
+    if (HAL_CAN_ConfigFilter(master_can, &(can->sFilterConfig)) != HAL_OK) {
+        /* Filter configuration Error */
+        CAN_Error_Record(can->err, CAN_ERR_FILTER_FAILED);
+        return;
+    }
+}
+
+/*
+Purpose:
+- Separate starting and initializing CAN. This way, the programmer can set up
+filters after initializing.
+- Initialize TxHeader (except StdId) --> this will probably be moved to
+QuickSetup at some point
+
+The following HAL functions will be used:
+- HAL_CAN_Start(&hcan)
+- HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING |
+CAN_IT_RX_FIFO1_MSG_PENDING) \
+*/
+static void CAN_Run(CANBUS *can) {
+
+    if (can->err->last_fatal != CAN_ERR_NONE) {
+        /* Don't attempt to run if we had a fatal error during initialization */
+        return;
+    }
+
+    if (HAL_CAN_Start(can->hcan) != HAL_OK) {
+        /* Start Error */
+        CAN_Error_Record(can->err, CAN_ERR_START_FAILED);
+    }
+
+    if (HAL_CAN_ActivateNotification(
+            can->hcan, CAN_IT_RX_FIFO0_MSG_PENDING |
+                           CAN_IT_RX_FIFO1_MSG_PENDING) != HAL_OK) {
+        /* Notification Error */
+        CAN_Error_Record(can->err, CAN_ERR_NOTIFY_FAILED);
+        return;
+    }
+
+    can->TxHeader.RTR =
+        CAN_RTR_DATA;      /* The frames that will be sent are Data */
+    can->TxHeader.DLC = 8; /* The frames will contain 8 data bytes */
+    can->TxHeader.IDE = CAN_ID_STD;
+
+    can->TxHeader.TransmitGlobalTime = DISABLE;
+}
+
+/*
+Purpose:
+- Cast double message to byte array of 8 bytes (use DoubleCaster union)
+- Form TxHeader.StdId from the device_id and data_type
+- Check mailbox availability and send message
+*/
+static void CAN_Send(CANBUS *can, double message, uint8_t data_type) {
+    /* if bus is off */
+    if (can->err->is_bus_off) {
+        uint32_t elapsed = HAL_GetTick() - can->err->last_error_tick;
+        if (elapsed < CAN_BUSOFF_RECOVERY_MS) {
+            return;
+        }
+
+        HAL_CAN_Stop(can->hcan);
+        if (HAL_CAN_Start(can->hcan) == HAL_OK) {
+            CAN_Error_Clear(can->err);
+        } else {
+            CAN_Error_Record(can->err, CAN_ERR_TX_BUS_OFF);
+            return;
+        }
+    }
+
+    /* wait for a free TX mailbox (with timeout) */
+    uint32_t t0 = HAL_GetTick();
+    while (HAL_CAN_GetTxMailboxesFreeLevel(can->hcan) == 0) {
+        if ((HAL_GetTick() - t0) >= CAN_TX_MAILBOX_TIMEOUT_MS) {
+            can->err->tx_retries++;
+            CAN_Error_Record(can->err, CAN_ERR_TX_MAILBOX_TIMEOUT);
+
+            if (can->err->tx_retries >= CAN_TX_MAX_RETRIES) {
+                CAN_Error_Record(can->err, CAN_ERR_TX_BUS_OFF);
+            }
+            return;
+        }
+    }
+
+    can->TxHeader.StdId = ((can->device_id & 0x0F) << 7) + data_type;
+
+    DoubleCaster c;
+    c.num = message;
+    for (int j = 0; j < 8; j++) {
+        can->TxData[j] = c.arr[j];
+    }
+
+    if (HAL_CAN_AddTxMessage(can->hcan, &(can->TxHeader), can->TxData,
+                             &(can->TxMailbox)) != HAL_OK) {
+        can->err->tx_retries++;
+        CAN_Error_Record(can->err, CAN_ERR_TX_ADD_FAILED);
+
+        if (can->err->tx_retries >= CAN_TX_MAX_RETRIES) {
+            CAN_Error_Record(can->err, CAN_ERR_TX_BUS_OFF);
+        }
+        return;
+    }
+
+    /* ---- Success: clear transient TX counters --------------------------- */
+    can->err->tx_retries = 0;
+    /* Only clear the code if the previous error was a transient TX fault */
+    if (can->err->code == CAN_ERR_TX_MAILBOX_TIMEOUT ||
+        can->err->code == CAN_ERR_TX_ADD_FAILED ||
+        can->err->code == CAN_ERR_TX_MAX_RETRIES) {
+        can->err->code = CAN_ERR_NONE;
+    }
+}
+/*
+Purpose: return the data double assigned in the CAN interrupt
+*/
+static double CAN_GetData(CANBUS *can) { return can->data; }
+
+static int CAN_GetHardwareRaw(CANBUS *can) { return can->rec_hardware; }
+
+static int CAN_GetDataTypeRaw(CANBUS *can) { return can->rec_dataType; }
+
+/*
+Purpose: return the dataType string assigned in the CAN interrupt
+*/
+static char *CAN_GetDataType(CANBUS *can) {
+    const char *dataType_string =
+        readDataType(can->rec_hardware, can->rec_dataType);
+    memcpy(can->dataType, dataType_string, strlen(dataType_string) + 1);
+    return can->dataType;
+}
+
+/*
+Purpose: return the hardware string assigned in the CAN interrupt
+*/
+static char *CAN_GetHardware(CANBUS *can) {
+    const char *hardware_string = devices[can->rec_hardware];
+    memcpy(can->hardware, hardware_string, strlen(hardware_string) + 1);
+    return can->hardware;
+}
+
+// Helper function called if HAL GetRXMessage does not throw an error
+void CAN_Interrupt_Helper(CANBUS *can) {
+    DoubleCaster c;
+    for (int i = 0; i < 8; i++) {
+        c.arr[i] = can->RxDataFIFO0[i];
+    }
+    can->data = c.num;
+
+    // assign hardware array
+    uint8_t hardware_id = ((can->RxHeaderFIFO0.StdId) >> 7) & 0x0F;
+    can->rec_hardware = hardware_id;
+
+    // assign dataType array
+    uint8_t dataType_id = (can->RxHeaderFIFO0.StdId) & 0x0F;
+    can->rec_dataType = dataType_id;
+
+    // Clear RX error if we successfully received a message
+    if (can->err->code == CAN_ERR_RX_FAILED) {
+        can->err->code = CAN_ERR_NONE;
+    }
+}
+
+/*
+Purpose:
+- Receive only data from a certain device
+
+Method:
+- Set filter to 0b [device_id: 4 bits] 000 0000
+- Set mask to 0b 1111 111 0000 --> compare only the first 7 bits
+- Increment filter_bank every call
+- Routes accepted frames to the FIFO specified by FIFO_index (CAN_RX_FIFO0 or
+  CAN_RX_FIFO1)
+
+*/
+static void CAN_AddFilterDevice(CANBUS *can, int device_id,
+                                uint32_t FIFO_index) {
+    if (can->filter_bank > can->max_filter_bank) {
+        /* No more filter banks available for this instance */
+        CAN_Error_Record(can->err, CAN_ERR_FILTER_BANK_FULL);
+        return;
+    }
+
+    can->sFilterConfig.FilterBank = can->filter_bank;
+    can->sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+    can->sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+    can->sFilterConfig.FilterIdHigh = ((device_id & 0x0F) << 7) << 5;
+    can->sFilterConfig.FilterIdLow = 0x0000;
+    can->sFilterConfig.FilterMaskIdHigh = 0xF000;
+    can->sFilterConfig.FilterMaskIdLow = 0x0000;
+    can->sFilterConfig.FilterFIFOAssignment = FIFO_index;
+    can->sFilterConfig.FilterActivation = ENABLE;
+
+    /* All filter configuration must go through the master (CAN1) handle. */
+    if (HAL_CAN_ConfigFilter(master_can, &(can->sFilterConfig)) != HAL_OK) {
+        /* Filter configuration Error */
+        CAN_Error_Record(can->err, CAN_ERR_FILTER_FAILED);
+        return;
+    }
+
+    can->filter_bank++;
+}
+
+/*
+Purpose:
+- Receive only the device+datatype that it needs to reduce the frequency of FIFO
+interrupts
+
+Method:
+- Set filter to encoded ID: [device_id: 4 bits] 000 [data_type: 4 bits]
+- Set mask to 0b 1111 1111 1111
+- Increment filter_bank every call
+- Routes accepted frames to the FIFO specified by FIFO_index (CAN_RX_FIFO0 or
+  CAN_RX_FIFO1)
+
+*/
+static void CAN_AddFilterDeviceData(CANBUS *can, int device_id, int data_type,
+                                    uint32_t FIFO_index) {
+    if (can->filter_bank > can->max_filter_bank) {
+        /* No more filter banks available for this instance */
+        CAN_Error_Record(can->err, CAN_ERR_FILTER_BANK_FULL);
+        return;
+    }
+
+    can->sFilterConfig.FilterBank = can->filter_bank;
+    can->sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+    can->sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+    can->sFilterConfig.FilterIdHigh = (((device_id & 0x0F) << 7) + data_type)
+                                      << 5;
+    can->sFilterConfig.FilterIdLow = 0x0000;
+    can->sFilterConfig.FilterMaskIdHigh = 0b1111000111100000;
+    can->sFilterConfig.FilterMaskIdLow = 0x0000;
+    can->sFilterConfig.FilterFIFOAssignment = FIFO_index;
+    can->sFilterConfig.FilterActivation = ENABLE;
+
+    /* All filter configuration must go through the master (CAN1) handle. */
+    if (HAL_CAN_ConfigFilter(master_can, &(can->sFilterConfig)) != HAL_OK) {
+        /* Filter configuration Error */
+        CAN_Error_Record(can->err, CAN_ERR_FILTER_FAILED);
+        return;
+    }
+
+    can->filter_bank++;
+}
+
+// Pseudo-constructor to mimic C++ convention with C limitations
+// Single-CAN flavor: drives CAN1 with filter banks [0..28].
+CANBUS CAN_new(void) {
+    CANBUS can;
+    can.init = CAN_QuickSetup;
+    can.begin = CAN_Run;
+    can.getData = CAN_GetData;
+    can.getDataType = CAN_GetDataType;
+    can.getHardware = CAN_GetHardware;
+    can.getDataTypeRaw = CAN_GetDataTypeRaw;
+    can.getHardwareRaw = CAN_GetHardwareRaw;
+    can.addFilterDevice = CAN_AddFilterDevice;
+    can.addFilterDeviceData = CAN_AddFilterDeviceData;
+    can.send = CAN_Send;
+
+    can.instance = CAN_1;
+    can.filter_bank = 0;
+    can.max_filter_bank = CAN_MAX_FILTER_BANK_INDEX;
+    can.sFilterConfig.SlaveStartFilterBank = CAN_MAX_FILTER_BANK_INDEX; /* Slave start bank Set only once. */
+
+    return can;
+}
+
+// Pseudo-constructor for dual-CAN setups.
+//   CAN_1 -> filter banks [0 .. 13]
+//   CAN_2 -> filter banks [14 .. 27]
+// CAN_1 must be init()'d before CAN_2.
+CANBUS CAN_new_dual(int can_index) {
+    CANBUS can;
+    can.init = CAN_QuickSetup;
+    can.begin = CAN_Run;
+    can.getData = CAN_GetData;
+    can.getDataType = CAN_GetDataType;
+    can.getHardware = CAN_GetHardware;
+    can.getDataTypeRaw = CAN_GetDataTypeRaw;
+    can.getHardwareRaw = CAN_GetHardwareRaw;
+    can.addFilterDevice = CAN_AddFilterDevice;
+    can.addFilterDeviceData = CAN_AddFilterDeviceData;
+    can.send = CAN_Send;
+
+    can.instance = can_index;
+    can.filter_bank = (can_index == CAN_2) ? CAN_2_FILTER_BANK_INDEX : 0;
+    can.max_filter_bank = (can_index == CAN_2) ? CAN_2_MAX_FILTER_BANK_INDEX
+                                               : CAN_1_MAX_FILTER_BANK_INDEX;
+    can.sFilterConfig.SlaveStartFilterBank =
+        CAN_2_FILTER_BANK_INDEX; /* Slave start bank Set only once. */
+
+    return can;
+}

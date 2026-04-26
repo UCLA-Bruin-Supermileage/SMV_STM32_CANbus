@@ -5,7 +5,6 @@
 // error handling instance; only one CAN_Error struct is needed for the whole
 // library since it just records the most recent error, so we can just have a
 // global instance that all CANBUS objects point to
-static CAN_Error smv_can_error_instance;
 
 #define CAN_TX_MAILBOX_TIMEOUT_MS 5u /* max wait for a free TX mailbox      */
 #define CAN_TX_MAX_RETRIES 3u        /* consecutive failures before Bus-Off */
@@ -82,6 +81,14 @@ const char *readDataType(int first, int last) {
 }
 
 /*
+ * Master CAN handle. On STM32F4 bxCAN, CAN1 is the master peripheral and CAN2
+ * is the slave. All filter bank configuration -- for both instances -- must be
+ * done through the master handle. We capture it the first time CAN1 is
+ * initialized so that CAN2's filter functions can find it.
+ */
+static CAN_HandleTypeDef *master_can = NULL;
+
+/*
 CAN error handler
 */
 
@@ -145,10 +152,13 @@ Purpose:
 - Initialize can object with our tested can settings
 - Set initial open filter (0x0000) --> gets overwritten if programmer uses
 AddFilter function
-- Initialize filter_bank to 0
+- Filter bank index and bounds are pre-seeded by the constructor (CAN_new or
+  CAN_new_dual) -- we do NOT reset filter_bank here, because CAN_2 starts at
+  bank 14, not 0.
 
 Programmer's POV:
-- Enable CAN1, initialize CAN pins, enable interrupts, and set clock
+- Enable CAN1 (and CAN2 if dual), initialize CAN pins, enable interrupts, and
+  set clock
 
 Reasons for limiting abstraction (programmer will have to set up ioc in the
 beginning):
@@ -163,19 +173,19 @@ the ioc UI will never show the CAN pins, which could be awkward
 static void CAN_QuickSetup(CANBUS *can, int hardware,
                            CAN_HandleTypeDef *can_obj) {
     can->hcan = can_obj;
-
-    can->err = &smv_can_error_instance;
+    CAN_Error error_instance;
+    can->err = &error_instance;
 
     for (int i = 0; i < 8; i++) {
         can->RxDataFIFO0[i] = 0;
+        can->RxDataFIFO1[i] = 0;
     }
 
     can->data = 0;
 
     can->device_id = hardware;
-    can->filter_bank = 0;
 
-    can->hcan->Instance = CAN1;
+    can->hcan->Instance = (can->instance == CAN_2) ? CAN2 : CAN1;
     can->hcan->Init.Prescaler = 6;
     can->hcan->Init.Mode = CAN_MODE_NORMAL;
     can->hcan->Init.SyncJumpWidth = CAN_SJW_1TQ;
@@ -188,7 +198,19 @@ static void CAN_QuickSetup(CANBUS *can, int hardware,
     can->hcan->Init.ReceiveFifoLocked = DISABLE;
     can->hcan->Init.TransmitFifoPriority = DISABLE;
 
-    __HAL_RCC_CAN1_CLK_ENABLE();
+    if (can->instance == CAN_2) {
+        /* CAN1 must be init'd first; its handle is required to configure CAN2
+         * filter banks. If a user calls init() on CAN_2 before CAN_1, record
+         * an init failure and bail out instead of asserting. */
+        if (master_can == NULL) {
+            CAN_Error_Record(can->err, CAN_ERR_INIT_FAILED);
+            return;
+        }
+        __HAL_RCC_CAN2_CLK_ENABLE();
+    } else {
+        __HAL_RCC_CAN1_CLK_ENABLE();
+        master_can = can->hcan;
+    }
 
     if (HAL_CAN_Init(can_obj) != HAL_OK) {
         /* Initialization Error */
@@ -197,9 +219,10 @@ static void CAN_QuickSetup(CANBUS *can, int hardware,
     }
 
     can->sFilterConfig.SlaveStartFilterBank =
-        14; /* Slave start bank Set only once. */
+        CAN_2_FILTER_BANK_INDEX; /* Slave start bank Set only once. */
 
-    can->sFilterConfig.FilterBank = 0; /* Select the filter number 0 */
+    can->sFilterConfig.FilterBank =
+        can->filter_bank; /* CAN_1 starts at 0, CAN_2 starts at 14 */
     can->sFilterConfig.FilterMode =
         CAN_FILTERMODE_IDMASK; /* Using ID mask mode .. */
     can->sFilterConfig.FilterScale =
@@ -213,11 +236,13 @@ static void CAN_QuickSetup(CANBUS *can, int hardware,
         0x0000; /* The filter is set to check only on the ID format */
     can->sFilterConfig.FilterFIFOAssignment =
         CAN_RX_FIFO0; /* All the messages accepted by this filter will be
-                         received on FIFO1 */
+                         received on FIFO0 */
     can->sFilterConfig.FilterActivation =
         ENABLE; /* Enable the filter number 0 */
 
-    if (HAL_CAN_ConfigFilter(can_obj, &(can->sFilterConfig)) != HAL_OK) {
+    /* Filter configuration must always go through the master (CAN1) handle,
+     * even for CAN2 banks. master_can was set above when CAN1 was init'd. */
+    if (HAL_CAN_ConfigFilter(master_can, &(can->sFilterConfig)) != HAL_OK) {
         /* Filter configuration Error */
         CAN_Error_Record(can->err, CAN_ERR_FILTER_FAILED);
         return;
@@ -386,12 +411,15 @@ Purpose:
 Method:
 - Set filter to 0b [device_id: 4 bits] 000 0000
 - Set mask to 0b 1111 111 0000 --> compare only the first 7 bits
-- Increment filter_bank every call (must be between 0 and 13 to operate)
+- Increment filter_bank every call
+- Routes accepted frames to the FIFO specified by FIFO_index (CAN_RX_FIFO0 or
+  CAN_RX_FIFO1)
 
 */
-static void CAN_AddFilterDevice(CANBUS *can, int device_id) {
-    if (can->filter_bank >= 14) {
-        /* No more filter banks available */
+static void CAN_AddFilterDevice(CANBUS *can, int device_id,
+                                uint32_t FIFO_index) {
+    if (can->filter_bank > can->max_filter_bank) {
+        /* No more filter banks available for this instance */
         CAN_Error_Record(can->err, CAN_ERR_FILTER_BANK_FULL);
         return;
     }
@@ -403,10 +431,11 @@ static void CAN_AddFilterDevice(CANBUS *can, int device_id) {
     can->sFilterConfig.FilterIdLow = 0x0000;
     can->sFilterConfig.FilterMaskIdHigh = 0xF000;
     can->sFilterConfig.FilterMaskIdLow = 0x0000;
-    can->sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
+    can->sFilterConfig.FilterFIFOAssignment = FIFO_index;
     can->sFilterConfig.FilterActivation = ENABLE;
 
-    if (HAL_CAN_ConfigFilter(can->hcan, &(can->sFilterConfig)) != HAL_OK) {
+    /* All filter configuration must go through the master (CAN1) handle. */
+    if (HAL_CAN_ConfigFilter(master_can, &(can->sFilterConfig)) != HAL_OK) {
         /* Filter configuration Error */
         CAN_Error_Record(can->err, CAN_ERR_FILTER_FAILED);
         return;
@@ -423,12 +452,15 @@ interrupts
 Method:
 - Set filter to encoded ID: [device_id: 4 bits] 000 [data_type: 4 bits]
 - Set mask to 0b 1111 1111 1111
-- Increment filter_bank every call (must be between 0 and 13 to operate)
+- Increment filter_bank every call
+- Routes accepted frames to the FIFO specified by FIFO_index (CAN_RX_FIFO0 or
+  CAN_RX_FIFO1)
 
 */
-static void CAN_AddFilterDeviceData(CANBUS *can, int device_id, int data_type) {
-    if (can->filter_bank >= 14) {
-        /* No more filter banks available */
+static void CAN_AddFilterDeviceData(CANBUS *can, int device_id, int data_type,
+                                    uint32_t FIFO_index) {
+    if (can->filter_bank > can->max_filter_bank) {
+        /* No more filter banks available for this instance */
         CAN_Error_Record(can->err, CAN_ERR_FILTER_BANK_FULL);
         return;
     }
@@ -441,10 +473,11 @@ static void CAN_AddFilterDeviceData(CANBUS *can, int device_id, int data_type) {
     can->sFilterConfig.FilterIdLow = 0x0000;
     can->sFilterConfig.FilterMaskIdHigh = 0b1111000111100000;
     can->sFilterConfig.FilterMaskIdLow = 0x0000;
-    can->sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
+    can->sFilterConfig.FilterFIFOAssignment = FIFO_index;
     can->sFilterConfig.FilterActivation = ENABLE;
 
-    if (HAL_CAN_ConfigFilter(can->hcan, &(can->sFilterConfig)) != HAL_OK) {
+    /* All filter configuration must go through the master (CAN1) handle. */
+    if (HAL_CAN_ConfigFilter(master_can, &(can->sFilterConfig)) != HAL_OK) {
         /* Filter configuration Error */
         CAN_Error_Record(can->err, CAN_ERR_FILTER_FAILED);
         return;
@@ -454,6 +487,7 @@ static void CAN_AddFilterDeviceData(CANBUS *can, int device_id, int data_type) {
 }
 
 // Pseudo-constructor to mimic C++ convention with C limitations
+// Single-CAN flavor: drives CAN1 with filter banks [0..28].
 CANBUS CAN_new(void) {
     CANBUS can;
     can.init = CAN_QuickSetup;
@@ -466,5 +500,38 @@ CANBUS CAN_new(void) {
     can.addFilterDevice = CAN_AddFilterDevice;
     can.addFilterDeviceData = CAN_AddFilterDeviceData;
     can.send = CAN_Send;
+
+    can.instance = CAN_1;
+    can.filter_bank = 0;
+    can.max_filter_bank = CAN_MAX_FILTER_BANK_INDEX;
+    can.sFilterConfig.SlaveStartFilterBank = CAN_MAX_FILTER_BANK_INDEX; /* Slave start bank Set only once. */
+
+    return can;
+}
+
+// Pseudo-constructor for dual-CAN setups.
+//   CAN_1 -> filter banks [0 .. 13]
+//   CAN_2 -> filter banks [14 .. 27]
+// CAN_1 must be init()'d before CAN_2.
+CANBUS CAN_new_dual(int can_index) {
+    CANBUS can;
+    can.init = CAN_QuickSetup;
+    can.begin = CAN_Run;
+    can.getData = CAN_GetData;
+    can.getDataType = CAN_GetDataType;
+    can.getHardware = CAN_GetHardware;
+    can.getDataTypeRaw = CAN_GetDataTypeRaw;
+    can.getHardwareRaw = CAN_GetHardwareRaw;
+    can.addFilterDevice = CAN_AddFilterDevice;
+    can.addFilterDeviceData = CAN_AddFilterDeviceData;
+    can.send = CAN_Send;
+
+    can.instance = can_index;
+    can.filter_bank = (can_index == CAN_2) ? CAN_2_FILTER_BANK_INDEX : 0;
+    can.max_filter_bank = (can_index == CAN_2) ? CAN_2_MAX_FILTER_BANK_INDEX
+                                               : CAN_1_MAX_FILTER_BANK_INDEX;
+    can.sFilterConfig.SlaveStartFilterBank =
+        CAN_2_FILTER_BANK_INDEX; /* Slave start bank Set only once. */
+
     return can;
 }
