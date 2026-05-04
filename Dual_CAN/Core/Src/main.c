@@ -32,8 +32,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define CAN1_SEND_INTERVAL 500
-#define CAN2_SEND_INTERVAL 100
+#define CAN1_SEND_INTERVAL 50
+#define CAN2_SEND_INTERVAL 50
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -51,10 +51,12 @@ UART_HandleTypeDef huart2;
 CANBUS can1;
 CANBUS can2;
 
+double CAN1_payload;
 double CAN1_data;
 char CAN1_sender [20] = {0};
 char CAN1_type [20] = {0};
 
+double CAN2_payload;
 double CAN2_data;
 char CAN2_sender [20] = {0};
 char CAN2_type [20] = {0};
@@ -64,6 +66,8 @@ char CAN2_type [20] = {0};
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_CAN1_Init(void);
+static void MX_CAN2_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
@@ -135,6 +139,9 @@ int main(void)
 	uint32_t can1_timer = 0;
 	uint32_t can2_timer = 0;
 	uint32_t current_time = 0;
+
+	CAN1_payload = 0;;
+	CAN2_payload = 100000;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -158,8 +165,8 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  can1 = CAN_new(CAN_1);
-  can2 = CAN_new(CAN_2);
+  can1 = CAN_new_dual(CAN_1);
+  can2 = CAN_new_dual(CAN_2);
 
   can1.init(&can1, UI, &hcan1);
   can2.init(&can2, FC, &hcan2);
@@ -167,8 +174,8 @@ int main(void)
   can1.begin(&can1);
   can2.begin(&can2);
 
-  can1.addFilterDevice(&can1, UI, CAN_RX_FIFO0);
-  can1.addFilterDeviceData(&can1, FC, FC_Pressure, CAN_RX_FIFO1);
+//  can1.addFilterDevice(&can1, UI, CAN_RX_FIFO0);
+//  can1.addFilterDeviceData(&can1, FC, FC_Pressure, CAN_RX_FIFO1);
 
   /* USER CODE END 2 */
 
@@ -176,17 +183,21 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
-	  current_time = HAL_GetTick();
-	  if((current_time - can1_timer) > CAN1_SEND_INTERVAL){
+	current_time = HAL_GetTick();
+		if((current_time - can1_timer) > CAN1_SEND_INTERVAL){
 		  can1_timer = current_time;
-		  can1.send(&can1, 31.2, Horn);
-	  }
+		  can1.send(&can1, CAN1_payload, Horn);
+			CAN1_payload+=0.1;
+		}
 
-	  if((current_time - can2_timer) > CAN2_SEND_INTERVAL){
+		if((current_time - can2_timer) > CAN2_SEND_INTERVAL){
 		  can2_timer = current_time;
-		  can2.send(&can1, 40.1, FC_Pressure);
-	  }
+		  can2.send(&can2, CAN2_payload, FC_Pressure);
+		  CAN2_payload = (CAN2_payload > 0)? (CAN2_payload - 0.1) : (CAN2_payload + 0.1);
+		}
+
+
+    /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
@@ -246,7 +257,79 @@ void SystemClock_Config(void)
   }
 }
 
+/**
+  * @brief CAN1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CAN1_Init(void)
+{
 
+  /* USER CODE BEGIN CAN1_Init 0 */
+
+  /* USER CODE END CAN1_Init 0 */
+
+  /* USER CODE BEGIN CAN1_Init 1 */
+
+  /* USER CODE END CAN1_Init 1 */
+  hcan1.Instance = CAN1;
+  hcan1.Init.Prescaler = 16;
+  hcan1.Init.Mode = CAN_MODE_NORMAL;
+  hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_1TQ;
+  hcan1.Init.TimeSeg2 = CAN_BS2_1TQ;
+  hcan1.Init.TimeTriggeredMode = DISABLE;
+  hcan1.Init.AutoBusOff = DISABLE;
+  hcan1.Init.AutoWakeUp = DISABLE;
+  hcan1.Init.AutoRetransmission = DISABLE;
+  hcan1.Init.ReceiveFifoLocked = DISABLE;
+  hcan1.Init.TransmitFifoPriority = DISABLE;
+  if (HAL_CAN_Init(&hcan1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CAN1_Init 2 */
+
+  /* USER CODE END CAN1_Init 2 */
+
+}
+
+/**
+  * @brief CAN2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CAN2_Init(void)
+{
+
+  /* USER CODE BEGIN CAN2_Init 0 */
+
+  /* USER CODE END CAN2_Init 0 */
+
+  /* USER CODE BEGIN CAN2_Init 1 */
+
+  /* USER CODE END CAN2_Init 1 */
+  hcan2.Instance = CAN2;
+  hcan2.Init.Prescaler = 16;
+  hcan2.Init.Mode = CAN_MODE_NORMAL;
+  hcan2.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan2.Init.TimeSeg1 = CAN_BS1_1TQ;
+  hcan2.Init.TimeSeg2 = CAN_BS2_1TQ;
+  hcan2.Init.TimeTriggeredMode = DISABLE;
+  hcan2.Init.AutoBusOff = DISABLE;
+  hcan2.Init.AutoWakeUp = DISABLE;
+  hcan2.Init.AutoRetransmission = DISABLE;
+  hcan2.Init.ReceiveFifoLocked = DISABLE;
+  hcan2.Init.TransmitFifoPriority = DISABLE;
+  if (HAL_CAN_Init(&hcan2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CAN2_Init 2 */
+
+  /* USER CODE END CAN2_Init 2 */
+
+}
 
 /**
   * @brief USART2 Initialization Function
