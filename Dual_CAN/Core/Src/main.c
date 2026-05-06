@@ -1,26 +1,27 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "smv_can_error.h"
 #include "smv_canbus.h"
 #include <string.h>
 /* USER CODE END Includes */
@@ -51,15 +52,18 @@ UART_HandleTypeDef huart2;
 CANBUS can1;
 CANBUS can2;
 
+CAN_Error *can1_error;
+CAN_Error *can2_error;
+
 double CAN1_payload;
 double CAN1_data;
-char CAN1_sender [20] = {0};
-char CAN1_type [20] = {0};
+char CAN1_sender[20] = {0};
+char CAN1_type[20] = {0};
 
 double CAN2_payload;
 double CAN2_data;
-char CAN2_sender [20] = {0};
-char CAN2_type [20] = {0};
+char CAN2_sender[20] = {0};
+char CAN2_type[20] = {0};
 
 /* USER CODE END PV */
 
@@ -78,75 +82,72 @@ static void MX_USART2_UART_Init(void);
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
 
 {
-    /* Get RX message from FIFO0 and fill the data on the related FIFO0 user declared header
-       (RxHeaderFIFO0) and table (RxDataFIFO0) */
-	CANBUS *can = (CanHandle->Instance == CAN1)? &can1:&can2;
-    if (HAL_CAN_GetRxMessage(CanHandle, CAN_RX_FIFO0, &(can->RxHeaderFIFO0), can->RxDataFIFO0) != HAL_OK)
-    {
-        /* Reception Error */
-       Error_Handler();
-    }else{
-		CAN_Interrupt_Helper(can);
-		if (can->instance == CAN_1){
-			CAN1_data = can->getData(can);
-			strcpy(CAN1_sender, (can->getHardware(can)));
-			strcpy(CAN1_type, can->getDataType(can));
-		}else{
-			CAN2_data = can->getData(can);
-			strcpy(CAN2_sender, (can->getHardware(can)));
-			strcpy(CAN2_type, can->getDataType(can));
-		}
-
+  /* Get RX message from FIFO0 and fill the data on the related FIFO0 user
+     declared header (RxHeaderFIFO0) and table (RxDataFIFO0) */
+  CANBUS *can = (CanHandle->Instance == CAN1) ? &can1 : &can2;
+  if (HAL_CAN_GetRxMessage(CanHandle, CAN_RX_FIFO0, &(can->RxHeaderFIFO0),
+                           can->RxDataFIFO0) != HAL_OK) {
+    /* Reception Error */
+    Error_Handler();
+  } else {
+    CAN_Interrupt_Helper(can);
+    if (can->instance == CAN_1) {
+      CAN1_data = can->getData(can);
+      strcpy(CAN1_sender, (can->getHardware(can)));
+      strcpy(CAN1_type, can->getDataType(can));
+    } else {
+      CAN2_data = can->getData(can);
+      strcpy(CAN2_sender, (can->getHardware(can)));
+      strcpy(CAN2_type, can->getDataType(can));
     }
-
+  }
 }
 
 void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
 
 {
-    /* Get RX message from FIFO0 and fill the data on the related FIFO0 user declared header
-       (RxHeaderFIFO0) and table (RxDataFIFO0) */
-	CANBUS *can = (CanHandle->Instance == CAN1)? &can1:&can2;
-    if (HAL_CAN_GetRxMessage(CanHandle, CAN_RX_FIFO1, &(can->RxHeaderFIFO1), can->RxDataFIFO1) != HAL_OK)
-    {
-        /* Reception Error */
-       Error_Handler();
-    }else{
-		CAN_Interrupt_Helper(can);
-		if (can->instance == CAN_1){
-			CAN1_data = can->getData(can);
-			strcpy(CAN1_sender, (can->getHardware(can)));
-			strcpy(CAN1_type, can->getDataType(can));
-		}else{
-			CAN2_data = can->getData(can);
-			strcpy(CAN2_sender, (can->getHardware(can)));
-			strcpy(CAN2_type, can->getDataType(can));
-		}
-
+  /* Get RX message from FIFO0 and fill the data on the related FIFO0 user
+     declared header (RxHeaderFIFO0) and table (RxDataFIFO0) */
+  CANBUS *can = (CanHandle->Instance == CAN1) ? &can1 : &can2;
+  if (HAL_CAN_GetRxMessage(CanHandle, CAN_RX_FIFO1, &(can->RxHeaderFIFO1),
+                           can->RxDataFIFO1) != HAL_OK) {
+    /* Reception Error */
+    Error_Handler();
+  } else {
+    CAN_Interrupt_Helper(can);
+    if (can->instance == CAN_1) {
+      CAN1_data = can->getData(can);
+      strcpy(CAN1_sender, (can->getHardware(can)));
+      strcpy(CAN1_type, can->getDataType(can));
+    } else {
+      CAN2_data = can->getData(can);
+      strcpy(CAN2_sender, (can->getHardware(can)));
+      strcpy(CAN2_type, can->getDataType(can));
     }
-
+  }
 }
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  * @retval int
-  */
-int main(void)
-{
+ * @brief  The application entry point.
+ * @retval int
+ */
+int main(void) {
 
   /* USER CODE BEGIN 1 */
-	uint32_t can1_timer = 0;
-	uint32_t can2_timer = 0;
-	uint32_t current_time = 0;
+  uint32_t can1_timer = 0;
+  uint32_t can2_timer = 0;
+  uint32_t current_time = 0;
 
-	CAN1_payload = 0;;
-	CAN2_payload = 100000;
+  CAN1_payload = 0;
+  ;
+  CAN2_payload = 100000;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick.
+   */
   HAL_Init();
 
   /* USER CODE BEGIN Init */
@@ -168,34 +169,33 @@ int main(void)
   can1 = CAN_new_dual(CAN_1);
   can2 = CAN_new_dual(CAN_2);
 
-  can1.init(&can1, UI, &hcan1);
-  can2.init(&can2, FC, &hcan2);
+  can1.init(&can1, UI, &hcan1, can1_error);
+  can2.init(&can2, FC, &hcan2, can2_error);
 
   can1.begin(&can1);
   can2.begin(&can2);
 
-//  can1.addFilterDevice(&can1, UI, CAN_RX_FIFO0);
-//  can1.addFilterDeviceData(&can1, FC, FC_Pressure, CAN_RX_FIFO1);
+  //  can1.addFilterDevice(&can1, UI, CAN_RX_FIFO0);
+  //  can1.addFilterDeviceData(&can1, FC, FC_Pressure, CAN_RX_FIFO1);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-	current_time = HAL_GetTick();
-		if((current_time - can1_timer) > CAN1_SEND_INTERVAL){
-		  can1_timer = current_time;
-		  can1.send(&can1, CAN1_payload, Horn);
-			CAN1_payload+=0.1;
-		}
+  while (1) {
+    current_time = HAL_GetTick();
+    if ((current_time - can1_timer) > CAN1_SEND_INTERVAL) {
+      can1_timer = current_time;
+      can1.send(&can1, CAN1_payload, Horn);
+      CAN1_payload += 0.1;
+    }
 
-		if((current_time - can2_timer) > CAN2_SEND_INTERVAL){
-		  can2_timer = current_time;
-		  can2.send(&can2, CAN2_payload, FC_Pressure);
-		  CAN2_payload = (CAN2_payload > 0)? (CAN2_payload - 0.1) : (CAN2_payload + 0.1);
-		}
-
+    if ((current_time - can2_timer) > CAN2_SEND_INTERVAL) {
+      can2_timer = current_time;
+      can2.send(&can2, CAN2_payload, FC_Pressure);
+      CAN2_payload =
+          (CAN2_payload > 0) ? (CAN2_payload - 0.1) : (CAN2_payload + 0.1);
+    }
 
     /* USER CODE END WHILE */
 
@@ -205,22 +205,21 @@ int main(void)
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
-void SystemClock_Config(void)
-{
+ * @brief System Clock Configuration
+ * @retval None
+ */
+void SystemClock_Config(void) {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
   /** Configure the main internal regulator output voltage
-  */
+   */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
+   * in the RCC_OscInitTypeDef structure.
+   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -230,40 +229,36 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 2;
   RCC_OscInitStruct.PLL.PLLR = 2;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
     Error_Handler();
   }
 
   /** Activate the Over-Drive mode
-  */
-  if (HAL_PWREx_EnableOverDrive() != HAL_OK)
-  {
+   */
+  if (HAL_PWREx_EnableOverDrive() != HAL_OK) {
     Error_Handler();
   }
 
   /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+   */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
+                                RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
-  {
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK) {
     Error_Handler();
   }
 }
 
 /**
-  * @brief CAN1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_CAN1_Init(void)
-{
+ * @brief CAN1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_CAN1_Init(void) {
 
   /* USER CODE BEGIN CAN1_Init 0 */
 
@@ -284,23 +279,20 @@ static void MX_CAN1_Init(void)
   hcan1.Init.AutoRetransmission = DISABLE;
   hcan1.Init.ReceiveFifoLocked = DISABLE;
   hcan1.Init.TransmitFifoPriority = DISABLE;
-  if (HAL_CAN_Init(&hcan1) != HAL_OK)
-  {
+  if (HAL_CAN_Init(&hcan1) != HAL_OK) {
     Error_Handler();
   }
   /* USER CODE BEGIN CAN1_Init 2 */
 
   /* USER CODE END CAN1_Init 2 */
-
 }
 
 /**
-  * @brief CAN2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_CAN2_Init(void)
-{
+ * @brief CAN2 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_CAN2_Init(void) {
 
   /* USER CODE BEGIN CAN2_Init 0 */
 
@@ -321,23 +313,20 @@ static void MX_CAN2_Init(void)
   hcan2.Init.AutoRetransmission = DISABLE;
   hcan2.Init.ReceiveFifoLocked = DISABLE;
   hcan2.Init.TransmitFifoPriority = DISABLE;
-  if (HAL_CAN_Init(&hcan2) != HAL_OK)
-  {
+  if (HAL_CAN_Init(&hcan2) != HAL_OK) {
     Error_Handler();
   }
   /* USER CODE BEGIN CAN2_Init 2 */
 
   /* USER CODE END CAN2_Init 2 */
-
 }
 
 /**
-  * @brief USART2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART2_UART_Init(void)
-{
+ * @brief USART2 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USART2_UART_Init(void) {
 
   /* USER CODE BEGIN USART2_Init 0 */
 
@@ -354,23 +343,20 @@ static void MX_USART2_UART_Init(void)
   huart2.Init.Mode = UART_MODE_TX_RX;
   huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
   huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart2) != HAL_OK)
-  {
+  if (HAL_UART_Init(&huart2) != HAL_OK) {
     Error_Handler();
   }
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
-
 }
 
 /**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_GPIO_Init(void)
-{
+ * @brief GPIO Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_GPIO_Init(void) {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
@@ -408,32 +394,30 @@ static void MX_GPIO_Init(void)
 /* USER CODE END 4 */
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
-void Error_Handler(void)
-{
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
+void Error_Handler(void) {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
-  while (1)
-  {
+  while (1) {
   }
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
 /**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
-void assert_failed(uint8_t *file, uint32_t line)
-{
+ * @brief  Reports the name of the source file and the source line number
+ *         where the assert_param error has occurred.
+ * @param  file: pointer to the source file name
+ * @param  line: assert_param error line source number
+ * @retval None
+ */
+void assert_failed(uint8_t *file, uint32_t line) {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* User can add his own implementation to report the file name and line
+     number, ex: printf("Wrong parameters value: file %s on line %d\r\n", file,
+     line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

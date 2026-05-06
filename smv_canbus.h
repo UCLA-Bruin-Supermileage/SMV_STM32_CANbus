@@ -3,6 +3,7 @@
 
 #include "stm32f4xx_hal.h"
 #include "smv_board_enums.h"
+#include "smv_can_error.h"
 
 #define CAN_2_FILTER_BANK_INDEX 14
 #define CAN_1_MAX_FILTER_BANK_INDEX 13
@@ -36,8 +37,11 @@ struct CANBUS {
     uint8_t filter_bank; //keep track of which filter bank to fill next; we want to keep it between 0 and 14
     uint8_t max_filter_bank;
 
+    /* ERROR HANDLING */
+    CAN_Error *err; // pointer to error struct, defined in smv_can_error.h
+
     /* METHODS */
-    void (*init)(CANBUS*, int, CAN_HandleTypeDef*); /* initialize the CAN bus driver @param CANBUS* pointer to your CANBUS object @param int your board's ID. reference the enums. @param CAN_HandleTypeDef* pointer to your STM32 generated CAN handler */
+    void (*init)(CANBUS*, int, CAN_HandleTypeDef*, CAN_Error*); /* initialize the CAN bus driver @param CANBUS* pointer to your CANBUS object @param int your board's ID. reference the enums. @param CAN_HandleTypeDef* pointer to your STM32 generated CAN handler @param CAN_Error* pointer to your CAN error object */
     void (*begin)(CANBUS*); /* CAN bus begins running in normal mode @param CANBUS* pointer to your CANBUS object */
     double (*getData)(CANBUS*); /* get incoming message from CAN bus line @param CANBUS* pointer to your CANBUS object */
     int (*getDataTypeRaw)(CANBUS*); /*get raw integer value of data type received*/
