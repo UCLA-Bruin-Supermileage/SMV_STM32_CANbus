@@ -66,4 +66,5 @@ enum DAQMessage {
     Altitude
 };
 
+
 #endif
