@@ -92,6 +92,24 @@ static CAN_HandleTypeDef *master_can = NULL;
 CAN error handler
 */
 
+/* Method to visualize CAN error */
+void CAN_Error_Blink(CAN_Error *err, CAN_Error_LED *led) {
+  if (err->code == CAN_ERR_NONE)
+    return;
+
+  HAL_GPIO_WritePin(led->port, led->pin, GPIO_PIN_RESET);
+  HAL_Delay(1000);
+
+  for (int i = 0; i < (int)err->code; i++) {
+    HAL_GPIO_WritePin(led->port, led->pin, GPIO_PIN_SET);
+    HAL_Delay(400);
+    HAL_GPIO_WritePin(led->port, led->pin, GPIO_PIN_RESET);
+    HAL_Delay(400);
+  }
+
+  HAL_Delay(1500);
+}
+
 void CAN_Error_Record(CAN_Error *err, CAN_ErrorCode code) {
   err->code = code;
   err->last_error_tick = HAL_GetTick();

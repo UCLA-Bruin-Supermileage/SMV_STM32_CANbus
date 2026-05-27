@@ -52,6 +52,7 @@ UART_HandleTypeDef huart2;
 /* USER CODE BEGIN PV */
 CANBUS can1;
 CAN_Error can_error;
+CAN_Error_LED err_led = {GPIOA, GPIO_PIN_5};
 
 static uint32_t CAN_timer = 0;
 static double CAN_read = 0;
@@ -124,6 +125,9 @@ int main(void) {
       can_send[2] += 1;
     }
     /* USER CODE BEGIN 3 */
+    if (can1.err->code != CAN_ERR_NONE) {
+      CAN_Error_Blink(can1.err, &err_led);
+    }
   }
   /* USER CODE END 3 */
 }

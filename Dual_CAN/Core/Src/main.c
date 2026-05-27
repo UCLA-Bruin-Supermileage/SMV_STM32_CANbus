@@ -55,6 +55,8 @@ CANBUS can2;
 CAN_Error *can1_error;
 CAN_Error *can2_error;
 
+CAN_Error_LED err_led = {GPIOA, GPIO_PIN_5};
+
 double CAN1_payload;
 double CAN1_data;
 char CAN1_sender[20] = {0};
@@ -200,6 +202,15 @@ int main(void) {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+    // TODO: Need a way to differentiate between CAN1 and CAN2 errors if we're
+    // using both.
+    if (can1.err->code != CAN_ERR_NONE) {
+      CAN_Error_Blink(can1.err, &err_led);
+    }
+    if (can2.err->code != CAN_ERR_NONE) {
+      CAN_Error_Blink(can2.err, &err_led);
+    }
   }
   /* USER CODE END 3 */
 }
